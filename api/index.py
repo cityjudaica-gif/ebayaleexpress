@@ -8,13 +8,12 @@ import requests
 app = Flask(__name__)
 CORS(app)
 
-# Подтягиваем данные из настроек Vercel
+# Читаем ключи из настроек Vercel
 APP_KEY = os.environ.get('ALI_APP_KEY')
 SECRET_KEY = os.environ.get('ALI_SECRET_KEY')
 TRACKING_ID = os.environ.get('ALI_TRACKING_ID')
 
 def generate_signature(params, secret):
-    # Фирменная подпись AliExpress
     sorted_params = sorted(params.items())
     query_string = "".join(f"{k}{v}" for k, v in sorted_params)
     return hashlib.md5((secret + query_string + secret).encode('utf-8')).hexdigest().upper()
@@ -25,7 +24,7 @@ def check_price():
     ebay_price = request.args.get('ebay_price')
 
     if not APP_KEY or not SECRET_KEY:
-        return jsonify({"found": False, "error": "API Keys missing"})
+        return jsonify({"found": False, "error": "API Keys not found in Vercel Environment Variables"})
 
     params = {
         "method": "aliexpress.affiliate.product.query",
@@ -42,11 +41,9 @@ def check_price():
     params["sign"] = generate_signature(params, SECRET_KEY)
     
     try:
-        # Для режима Test используем глобальный эндпоинт
         response = requests.get("https://api-sg.aliexpress.com/sync", params=params, timeout=10)
         data = response.json()
         
-        # Разбираем ответ
         res = data.get("aliexpress_affiliate_product_query_response", {}).get("resp_result", {}).get("result", {})
         products = res.get("products", {}).get("product", [])
         
@@ -54,15 +51,22 @@ def check_price():
             item = products[0]
             ali_price = float(item.get("target_sale_price"))
             
-            # Логика: показываем только если реально дешевле
             if ebay_price and ali_price < float(ebay_price):
                 return jsonify({
                     "found": True,
                     "ali_price": ali_price,
-                    "link": item.get("promotion_link"),
-                    "savings": round(float(ebay_price) - ali_price, 2)
+                    "link": item.get("promotion_link")
                 })
         
-        return jsonify({"found": False, "debug": "No products found on Ali"})
+        return jsonify({"found": False})
     except Exception as e:
         return jsonify({"found": False, "error": str(e)})
+
+# Тестовая точка для проверки ключей
+@app.route('/api/debug')
+def debug():
+    return jsonify({
+        "APP_KEY_SET": bool(APP_KEY),
+        "SECRET_KEY_SET": bool(SECRET_KEY),
+        "TRACKING_ID_SET": bool(TRACKING_ID)
+    })
